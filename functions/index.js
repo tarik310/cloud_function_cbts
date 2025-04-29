@@ -7,6 +7,38 @@ const db = admin.firestore();
 
 exports.getBooksAfterDate = functions.https.onRequest({}, async (req, res) => {
   try {
+    if (
+      (!req.headers.authorization || !req.headers.authorization.startsWith("Bearer ")) &&
+      !(req.cookies && req.cookies.__session)
+    ) {
+      console.error(
+        "No Firebase ID token was passed as a Bearer token in the Authorization header.",
+        "Make sure you authorize your request by providing the following HTTP header:",
+        "Authorization: Bearer <Firebase ID Token>",
+        'or by passing a "__session" cookie.'
+      );
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    let idToken;
+    if (req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+      // Read the ID Token from the Authorization header.
+      idToken = req.headers.authorization.split("Bearer ")[1];
+    } else if (req.cookies) {
+      // Read the ID Token from cookie.
+      idToken = req.cookies.__session;
+    } else {
+      // No authorization
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+    try {
+      decodedIdToken = await admin.auth().verifyIdToken(idToken);
+    } catch (authError) {
+      console.error("Failed to verify ID token:", authError);
+      return res
+        .status(403)
+        .json({ error: "Unauthorized - invalid or expired ID token." });
+    }
     const { date } = req.query;
     if (!date) {
       return res.status(400).json({ error: "Missing 'date' parameter." });
@@ -56,6 +88,7 @@ exports.getBooksAfterDate = functions.https.onRequest({}, async (req, res) => {
     const lastSyncedOn = new Date().toISOString();
 
     return res.status(200).json({
+      userEmail: decodedIdToken.email,
       lastSyncedOn,
       countUpdatedData: recentlyUpdatedData.length,
       countCreatedData: recentlyCreatedData.length,
